@@ -1,32 +1,33 @@
-# =========================================
-# OTIMIZADOR CNC FANCOIL - VERSÃO PROFISSIONAL
-# =========================================
+import streamlit as st
 
-def coletar_dados():
-    print("=== OTIMIZADOR CNC FANCOIL ===")
+st.title("🔥 Otimizador CNC Fancoil")
 
-    largura_chapa = float(input("Largura da chapa (mm): "))
-    altura_chapa = float(input("Altura da chapa (mm): "))
+# -------------------------------
+# ENTRADA
+# -------------------------------
+largura_chapa = st.number_input("Largura da chapa (mm)", value=2000)
+altura_chapa = st.number_input("Altura da chapa (mm)", value=1000)
 
-    diametro_fresa = float(input("Diâmetro da fresa (mm): "))
-    espacamento = float(input("Espaçamento mínimo entre peças (mm): "))
+diametro_fresa = st.number_input("Diâmetro da fresa (mm)", value=6)
+espacamento = st.number_input("Espaçamento entre peças (mm)", value=5)
 
-    permitir_rotacao = input("Permitir rotação das peças? (s/n): ").lower() == "s"
+permitir_rotacao = st.checkbox("Permitir rotação")
 
-    pecas = []
-    qtd = int(input("Quantidade de peças: "))
+qtd = st.number_input("Quantidade de peças", 1, 50, 3)
 
-    for i in range(qtd):
-        print(f"\nPeça {i+1}")
-        l = float(input("Largura: "))
-        a = float(input("Altura: "))
-        pecas.append({"id": i+1, "l": l, "a": a})
+pecas = []
 
-    return largura_chapa, altura_chapa, diametro_fresa, espacamento, permitir_rotacao, pecas
+for i in range(qtd):
+    st.subheader(f"Peça {i+1}")
+    l = st.number_input(f"Largura {i}", key=f"l{i}")
+    a = st.number_input(f"Altura {i}", key=f"a{i}")
+    pecas.append({"id": i+1, "l": l, "a": a})
 
+# -------------------------------
+# PROCESSAMENTO
+# -------------------------------
+if st.button("Gerar Layout"):
 
-def nesting(largura_chapa, altura_chapa, espacamento, permitir_rotacao, pecas):
-    # Ordena peças maiores primeiro
     pecas.sort(key=lambda x: max(x["l"], x["a"]), reverse=True)
 
     x = 0
@@ -34,7 +35,6 @@ def nesting(largura_chapa, altura_chapa, espacamento, permitir_rotacao, pecas):
     linha_altura = 0
 
     resultado = []
-    nao_couberam = []
 
     for p in pecas:
         l = p["l"]
@@ -44,13 +44,8 @@ def nesting(largura_chapa, altura_chapa, espacamento, permitir_rotacao, pecas):
         if permitir_rotacao:
             opcoes.append((a, l))
 
-        colocado = False
-
         for (w, h) in opcoes:
-            largura_real = w + espacamento
-            altura_real = h + espacamento
-
-            if x + largura_real <= largura_chapa:
+            if x + w + espacamento <= largura_chapa:
                 resultado.append({
                     "id": p["id"],
                     "x": x,
@@ -58,117 +53,56 @@ def nesting(largura_chapa, altura_chapa, espacamento, permitir_rotacao, pecas):
                     "w": w,
                     "h": h
                 })
-
-                x += largura_real
-                linha_altura = max(linha_altura, altura_real)
-                colocado = True
+                x += w + espacamento
+                linha_altura = max(linha_altura, h + espacamento)
                 break
-
-        if not colocado:
-            # nova linha
+        else:
             x = 0
             y += linha_altura
             linha_altura = 0
 
-            for (w, h) in opcoes:
-                largura_real = w + espacamento
-                altura_real = h + espacamento
+    # -------------------------------
+    # SAÍDA
+    # -------------------------------
+    st.subheader("📐 Layout")
 
-                if y + altura_real <= altura_chapa:
-                    resultado.append({
-                        "id": p["id"],
-                        "x": x,
-                        "y": y,
-                        "w": w,
-                        "h": h
-                    })
+    for r in resultado:
+        st.write(f"Peça {r['id']} → X:{r['x']} Y:{r['y']} | {r['w']} x {r['h']} mm")
 
-                    x += largura_real
-                    linha_altura = max(linha_altura, altura_real)
-                    colocado = True
-                    break
-
-        if not colocado:
-            nao_couberam.append(p)
-
-    return resultado, nao_couberam
-
-
-def calcular_aproveitamento(largura_chapa, altura_chapa, resultado):
+    # Aproveitamento
     area_total = largura_chapa * altura_chapa
     area_usada = sum(r["w"] * r["h"] for r in resultado)
-    return (area_usada / area_total) * 100
 
+    st.success(f"Aproveitamento: {(area_usada/area_total)*100:.2f}%")
 
-def gerar_gcode(resultado, diametro_fresa, profundidade=-2):
-    print("\n=== GCODE GERADO ===")
+    # -------------------------------
+    # GCODE
+    # -------------------------------
+    if st.button("Gerar G-code"):
 
-    offset = diametro_fresa / 2
+        gcode = []
+        offset = diametro_fresa / 2
 
-    print("G21 ; mm")
-    print("G90 ; absoluto")
-    print("G0 Z5")
+        gcode.append("G21")
+        gcode.append("G90")
+        gcode.append("G0 Z5")
 
-    for r in resultado:
-        x = r["x"] + offset
-        y = r["y"] + offset
-        w = r["w"] - diametro_fresa
-        h = r["h"] - diametro_fresa
+        for r in resultado:
+            x = r["x"] + offset
+            y = r["y"] + offset
+            w = r["w"] - diametro_fresa
+            h = r["h"] - diametro_fresa
 
-        print(f"\n; Peça {r['id']}")
+            gcode.append(f"; Peça {r['id']}")
+            gcode.append(f"G0 X{x} Y{y}")
+            gcode.append("G1 Z-2 F300")
+            gcode.append(f"G1 X{x+w} Y{y}")
+            gcode.append(f"G1 X{x+w} Y{y+h}")
+            gcode.append(f"G1 X{x} Y{y+h}")
+            gcode.append(f"G1 X{x} Y{y}")
+            gcode.append("G0 Z5")
 
-        # aproximação segura
-        print(f"G0 X{x-5} Y{y-5}")
-        print("G0 Z5")
+        gcode.append("G0 X0 Y0")
+        gcode.append("M30")
 
-        # entrada suave
-        print(f"G1 X{x} Y{y} F800")
-        print(f"G1 Z{profundidade} F300")
-
-        # corte
-        print(f"G1 X{x+w} Y{y}")
-        print(f"G1 X{x+w} Y{y+h}")
-        print(f"G1 X{x} Y{y+h}")
-        print(f"G1 X{x} Y{y}")
-
-        # saída
-        print("G0 Z5")
-
-    print("\nG0 X0 Y0")
-    print("M30")
-
-
-def mostrar_resultado(resultado, nao_couberam, aproveitamento):
-    print("\n=== LAYOUT FINAL ===")
-
-    for r in resultado:
-        print(f"Peça {r['id']} -> X:{r['x']:.1f} Y:{r['y']:.1f} | {r['w']} x {r['h']} mm")
-
-    if nao_couberam:
-        print("\n--- NÃO COUBERAM ---")
-        for p in nao_couberam:
-            print(f"Peça {p['id']} ({p['l']} x {p['a']})")
-
-    print(f"\nAproveitamento: {aproveitamento:.2f}%")
-
-
-def main():
-    dados = coletar_dados()
-
-    resultado, nao_couberam = nesting(
-        dados[0], dados[1], dados[3], dados[4], dados[5]
-    )
-
-    aproveitamento = calcular_aproveitamento(
-        dados[0], dados[1], resultado
-    )
-
-    mostrar_resultado(resultado, nao_couberam, aproveitamento)
-
-    gerar = input("\nGerar G-code? (s/n): ").lower() == "s"
-    if gerar:
-        gerar_gcode(resultado, dados[2])
-
-
-if __name__ == "__main__":
-    main()
+        st.code("\n".join(gcode))
